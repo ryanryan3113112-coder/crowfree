@@ -12,7 +12,7 @@ screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 -- ===================== 主視窗 =====================
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 520, 0, 380)
-mainFrame.Position = UDim2.new(0.5, -260, 0.5, -190)  -- 手機置中
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -190)
 mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
@@ -30,7 +30,7 @@ mainStroke.Thickness = 1
 mainStroke.Transparency = 0.4
 mainStroke.Parent = mainFrame
 
--- 頂部標題列（不變）
+-- 頂部標題列
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 42)
 titleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
@@ -66,7 +66,7 @@ local minCorner = Instance.new("UICorner")
 minCorner.CornerRadius = UDim.new(0, 6)
 minCorner.Parent = minimizeBtn
 
--- 左側導航（不變）
+-- 左側導航
 local navFrame = Instance.new("Frame")
 navFrame.Size = UDim2.new(0, 140, 1, -42)
 navFrame.Position = UDim2.new(0, 0, 0, 42)
@@ -278,7 +278,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
--- ===================== 飛行功能（改成只有玩家移動才飛） =====================
+-- ===================== 飛行功能（只有玩家移動才飛） =====================
 local flyEnabled = false
 local flySpeed = 50
 local bv = nil
@@ -302,14 +302,12 @@ local function startFlying()
     bg.P = 90000
     bg.Parent = root
     
-    -- 只有玩家輸入移動時才給速度
     flyConnection = RunService.Heartbeat:Connect(function()
         if not flyEnabled or not root then return end
         
         local camera = workspace.CurrentCamera
         local moveDirection = Vector3.new(0, 0, 0)
         
-        -- 手機/PC 通用輸入檢查（手機用搖桿會觸發 IsKeyDown）
         if UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up) then
             moveDirection = moveDirection + camera.CFrame.LookVector
         end
@@ -329,15 +327,14 @@ local function startFlying()
             moveDirection = moveDirection - Vector3.new(0, 1, 0)
         end
         
-        -- 只有有移動輸入時才飛
         if moveDirection.Magnitude > 0 then
             moveDirection = moveDirection.Unit * flySpeed
             bv.Velocity = moveDirection
         else
-            bv.Velocity = Vector3.new(0, 0, 0)  -- 停下來
+            bv.Velocity = Vector3.new(0, 0, 0)
         end
         
-        bg.CFrame = camera.CFrame  -- 保持面向鏡頭方向
+        bg.CFrame = camera.CFrame
     end)
 end
 
@@ -347,8 +344,96 @@ local function stopFlying()
     if bg then bg:Destroy() bg = nil end
 end
 
+-- ===================== 白圓框 FOV 自瞄鎖定（鎖頭） =====================
+local AIM_ENABLED = false
+local FOV_RADIUS = 180
+local LOCK_PART = "Head"
+local AIM_MAX_DISTANCE = 2000
+
+local whiteCircle = Drawing.new("Circle")
+whiteCircle.Thickness = 2
+whiteCircle.NumSides = 100
+whiteCircle.Radius = FOV_RADIUS
+whiteCircle.Color = Color3.fromRGB(255, 255, 255)
+whiteCircle.Filled = false
+whiteCircle.Transparency = 0.8
+whiteCircle.Visible = false
+
+local function getClosestInFOV()
+    local closest = nil
+    local minDist = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetPart = player.Character:FindFirstChild(LOCK_PART)
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            
+            if targetPart and humanoid and humanoid.Health > 0 and root then
+                local distToPlayer = (root.Position - Camera.CFrame.Position).Magnitude
+                if distToPlayer > AIM_MAX_DISTANCE then continue end
+                
+                local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
+                if visible then
+                    local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                    if screenDist <= FOV_RADIUS and screenDist < minDist then
+                        minDist = screenDist
+                        closest = targetPart
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local aimConn = nil
+
+-- ===================== 穿牆功能（noclip） =====================
+local noclipEnabled = false
+local noclipConnection = nil
+
+local function toggleNoclip()
+    noclipEnabled = not noclipEnabled
+    
+    if noclipEnabled then
+        if noclipConnection then noclipConnection:Disconnect() end
+        
+        noclipConnection = RunService.Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
+        if LocalPlayer.Character then
+            for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    if noclipEnabled then
+        toggleNoclip()  -- 先關
+        toggleNoclip()  -- 再開，重新連線
+    end
+end)
+
 -- ===================== 功能按鈕列表 =====================
-local funcNames = {"ESP", "飛行", "Aimbot", "穿牆", "鎖頭", "自動擊殺"}
+local funcNames = {"ESP", "飛行", "鎖頭", "穿牆", "Aimbot", "自動擊殺"}
 
 for i, name in ipairs(funcNames) do
     local btn = Instance.new("TextButton")
@@ -367,30 +452,59 @@ for i, name in ipairs(funcNames) do
     btn.MouseButton1Click:Connect(function()
         if name == "ESP" then
             ESP_ENABLED = not ESP_ENABLED
-            
             if ESP_ENABLED then
                 btn.Text = "ESP [ON]"
-                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)
+                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)  -- 綠色
             else
                 btn.Text = "ESP [OFF]"
                 btn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
             end
-            
             for _, data in pairs(ESP_OBJECTS) do
                 if data.highlight then data.highlight.Enabled = ESP_ENABLED end
                 if data.bb then data.bb.Enabled = ESP_ENABLED end
             end
         elseif name == "飛行" then
             flyEnabled = not flyEnabled
-            
             if flyEnabled then
                 btn.Text = "飛行 [ON]"
-                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)
+                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)  -- 綠色
                 startFlying()
             else
                 btn.Text = "飛行 [OFF]"
                 btn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
                 stopFlying()
+            end
+        elseif name == "鎖頭" then
+            AIM_ENABLED = not AIM_ENABLED
+            whiteCircle.Visible = AIM_ENABLED
+            if AIM_ENABLED then
+                btn.Text = "鎖頭 [ON]"
+                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)  -- 統一綠色
+            else
+                btn.Text = "鎖頭 [OFF]"
+                btn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+            end
+            if AIM_ENABLED then
+                if aimConn then aimConn:Disconnect() end
+                aimConn = RunService.RenderStepped:Connect(function()
+                    whiteCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local target = getClosestInFOV()
+                    if target then
+                        local targetCFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+                        Camera.CFrame = targetCFrame
+                    end
+                end)
+            else
+                if aimConn then aimConn:Disconnect() aimConn = nil end
+            end
+        elseif name == "穿牆" then
+            toggleNoclip()
+            if noclipEnabled then
+                btn.Text = "穿牆 [ON]"
+                btn.BackgroundColor3 = Color3.fromRGB(40, 100, 60)  -- 綠色
+            else
+                btn.Text = "穿牆 [OFF]"
+                btn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
             end
         end
     end)
@@ -540,4 +654,4 @@ minimizeBtn.MouseButton1Click:Connect(function()
     miniBox.Visible = true
 end)
 
-print("crow UI 更新完成：ESP + 飛行已整合（飛行只有玩家移動時才動，手機板專用）")
+print("crow UI 更新完成：ESP + 飛行 + 鎖頭 + 穿牆已整合，所有開啟狀態統一綠色（手機板專用）")
